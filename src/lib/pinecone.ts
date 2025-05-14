@@ -1,21 +1,56 @@
-import { Pinecone, Index } from "@pinecone-database/pinecone"; // Added Index for type hint
-import { createEmbedding } from "./openai.ts"; // Ensure this correctly returns Promise<number[]>
-import { ensureServer } from "./env.ts"; // Ensure this is correctly set up for your environment
+import {
+  Pinecone,
+  Index,
+  IndexModel,
+  PineconeRecord as SDKPineconeRecord,
+  // QueryOptions, // This is a union type in the SDK, often better to type options structurally for specific query types
+} from "@pinecone-database/pinecone";
+
+import { createEmbedding } from "./openai.ts";
+import { ensureServer } from "./env.ts";
 
 export const RESPONSES_INDEX = "responses";
-const EXPECTED_EMBEDDING_DIMENSION = 1536; // Define this based on your embedding model
+const EXPECTED_EMBEDDING_DIMENSION = 1536;
 
+// --- Official Pinecone Metadata Types (based on SDK v6.0.0) ---
+export type PineconeMetadataValue = string | boolean | number | string[];
+export type BasePineconeMetadata = Record<string, PineconeMetadataValue>;
+
+// --- Custom Metadata Interfaces ---
+
+// Define specific known properties for StorableMetadata
+interface StorableMetadataSpecificProps {
+    type: string;
+    name: string;
+    originalText: string;
+}
+// StorableMetadata combines BasePineconeMetadata with its specific known string properties
+export interface StorableMetadata extends BasePineconeMetadata, StorableMetadataSpecificProps {}
+
+
+// Define specific known properties for FormSpecificMetadata
+interface FormSpecificMetadataSpecificProps {
+    type: string;
+    name: string;
+    originalText: string;
+    form_id: string;
+    response_id: string;
+    respondent_name: string;
+}
+// FormSpecificMetadata combines BasePineconeMetadata with its specific known string properties
+export interface FormSpecificMetadata extends BasePineconeMetadata, FormSpecificMetadataSpecificProps {}
+
+
+// --- Pinecone Client Initialization ---
 let _pineconeClient: Pinecone | null = null;
 
 function getPineconeClient(): Pinecone {
   ensureServer("getPineconeClient");
   if (!_pineconeClient) {
     if (!process.env.PINECONE_API_KEY) {
-      console.error("[getPineconeClient] PINECONE_API_KEY is not set in environment variables.");
+      console.error("[getPineconeClient] PINECONE_API_KEY is not set.");
       throw new Error("PINECONE_API_KEY environment variable is not set");
     }
-    // If your Pinecone project setup needs environment (e.g. for pod-based indexes), ensure it's checked.
-    // For serverless, typically only apiKey is needed for the client constructor.
     _pineconeClient = new Pinecone({
       apiKey: process.env.PINECONE_API_KEY,
     });
@@ -24,12 +59,13 @@ function getPineconeClient(): Pinecone {
   return _pineconeClient;
 }
 
+// --- Index Initialization and Management ---
 export async function initializeIndex() {
   console.log(`[initializeIndex] Checking for Pinecone index: "${RESPONSES_INDEX}"`);
   const client = getPineconeClient();
   try {
     const { indexes } = await client.listIndexes();
-    const indexExists = indexes?.some((index: { name: string }) => index.name === RESPONSES_INDEX);
+    const indexExists = indexes?.some((index: IndexModel) => index.name === RESPONSES_INDEX);
 
     if (!indexExists) {
       console.log(`[initializeIndex] Index "${RESPONSES_INDEX}" does not exist. Creating now...`);
@@ -38,17 +74,10 @@ export async function initializeIndex() {
         dimension: EXPECTED_EMBEDDING_DIMENSION,
         metric: 'cosine',
         spec: {
-          serverless: {
-            cloud: 'aws', // Or your preferred cloud
-            region: 'us-east-1' // Or your preferred region
-          }
+          serverless: { cloud: 'aws', region: 'us-east-1' }
         }
-        // For pod-based, spec might look like:
-        // spec: { pod: { environment: 'your-pinecone-environment', podType: 'p1.x1', pods: 1 } }
       });
-      console.log(`[initializeIndex] Index "${RESPONSES_INDEX}" created successfully. It might take a few moments to be ready.`);
-      // Consider adding a loop with client.describeIndex({ indexName: RESPONSES_INDEX })
-      // to wait until the index is ready, especially in automated scripts.
+      console.log(`[initializeIndex] Index "${RESPONSES_INDEX}" created. It may take moments to be ready.`);
     } else {
       console.log(`[initializeIndex] Index "${RESPONSES_INDEX}" already exists.`);
     }
@@ -58,140 +87,155 @@ export async function initializeIndex() {
   }
 }
 
-// Helper to get an index instance
-const getIndex = (): Index => getPineconeClient().Index(RESPONSES_INDEX); // Added Index type
+const getIndex = <TMetadata extends BasePineconeMetadata = StorableMetadata>(): Index<TMetadata> =>
+  getPineconeClient().Index<TMetadata>(RESPONSES_INDEX);
 
-// New function to clear all vectors from the index
 export async function clearPineconeIndex(indexName: string = RESPONSES_INDEX) {
   ensureServer("clearPineconeIndex");
-  console.log(`[clearPineconeIndex] Attempting to clear all vectors from index: "${indexName}"`);
+  console.log(`[clearPineconeIndex] Clearing index: "${indexName}"`);
   try {
-    const index = getPineconeClient().Index(indexName);
-    await index.deleteAll(); // Clears all vectors from the default namespace
-    // If using namespaces and want to clear a specific one:
-    // await index.namespace("your-namespace").deleteAll();
-    console.log(`[clearPineconeIndex] Successfully cleared all vectors from index: "${indexName}".`);
+    const index = getPineconeClient().Index<BasePineconeMetadata>(indexName);
+    await index.deleteAll();
+    console.log(`[clearPineconeIndex] Successfully cleared index: "${indexName}".`);
   } catch (error) {
     console.error(`[clearPineconeIndex] Error clearing index "${indexName}":`, error);
-    // It's possible the index doesn't exist; handle specific errors if necessary
-    if ((error as any).message && (error as any).message.includes("not found")) {
-        console.warn(`[clearPineconeIndex] Index "${indexName}" not found. Assuming it's already clean or yet to be created.`);
+    if (error instanceof Error && error.message.includes("not found")) {
+        console.warn(`[clearPineconeIndex] Index "${indexName}" not found.`);
     } else {
-        throw error; // Re-throw other errors
+        throw error;
     }
   }
 }
 
-
-interface StorableMetadata extends Record<string, any> {
+// --- Embedding Storage ---
+// InputStorableMetadata now explicitly has 'type' and 'name' as strings,
+// and omits 'originalText' from the specific props.
+// It also allows for other arbitrary keys compatible with BasePineconeMetadata.
+type InputStorableMetadata = {
     type: string;
     name: string;
-    // Add other common fields if necessary, e.g., email?: string;
-}
+} & Omit<BasePineconeMetadata, 'type' | 'name' | 'originalText'>; // Allow other base metadata keys
 
 export async function storeResponseEmbedding(
   text: string,
-  metadata: StorableMetadata
+  metadata: InputStorableMetadata // metadata.type and metadata.name are now strongly typed as string
 ) {
-  console.log(`[storeResponseEmbedding] Attempting to store embedding for ${metadata.type}: "${metadata.name}"`);
+  console.log(`[storeResponseEmbedding] Storing embedding for ${metadata.type}: "${metadata.name}"`);
   if (!text || text.trim() === "") {
-    console.warn(`[storeResponseEmbedding] Received empty or whitespace-only text for "${metadata.name}", skipping embedding.`);
+    console.warn(`[storeResponseEmbedding] Empty text for "${metadata.name}", skipping.`);
     return;
   }
 
-  const index = getIndex();
+  const index = getIndex<StorableMetadata>();
   let embedding: number[];
 
   try {
-    console.log(`[storeResponseEmbedding]   Creating embedding for text snippet: "${text.substring(0, 60)}..."`);
     embedding = await createEmbedding(text);
-    console.log(`[storeResponseEmbedding]   Embedding created (Dimension: ${embedding.length}) for "${metadata.name}".`);
-
     if (embedding.length !== EXPECTED_EMBEDDING_DIMENSION) {
-      const errMsg = `[storeResponseEmbedding] CRITICAL: Embedding dimension mismatch! Expected ${EXPECTED_EMBEDDING_DIMENSION}, got ${embedding.length} for "${metadata.name}".`;
-      console.error(errMsg);
-      throw new Error(errMsg);
+      throw new Error(`Embedding dimension mismatch for "${metadata.name}". Expected ${EXPECTED_EMBEDDING_DIMENSION}, got ${embedding.length}.`);
     }
   } catch (error) {
     console.error(`[storeResponseEmbedding] Failed to create embedding for "${metadata.name}":`, error);
     throw error;
   }
 
+  // metadata.name is now guaranteed to be a string due to InputStorableMetadata's definition.
   const idSuffix = metadata.name.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
   const generatedId = `${metadata.type}-${idSuffix}`;
-  console.log(`[storeResponseEmbedding]   Generated ID for upsert: "${generatedId}"`);
+
+  // Construct fullMetadata.
+  // Spread metadata to include any other BasePineconeMetadata properties.
+  // Then explicitly set type, name (which are already strings from InputStorableMetadata)
+  // and the new originalText.
+  const fullMetadata: StorableMetadata = {
+    ...(metadata as BasePineconeMetadata), // Spread other potential base metadata fields
+    type: metadata.type, // Explicitly from InputStorableMetadata (string)
+    name: metadata.name, // Explicitly from InputStorableMetadata (string)
+    originalText: text.substring(0, 1000)
+  };
+
+  const recordToUpsert: SDKPineconeRecord<StorableMetadata> = {
+    id: generatedId,
+    values: embedding,
+    metadata: fullMetadata
+  };
 
   try {
-    console.log(`[storeResponseEmbedding]   Upserting vector with ID "${generatedId}" into Pinecone index "${RESPONSES_INDEX}".`);
-    await index.upsert([{
-      id: generatedId,
-      values: embedding,
-      metadata: {
-        ...metadata,
-        originalText: text.substring(0, 1000) // Store original text, possibly truncated if very long
-      }
-    }]);
-    console.log(`[storeResponseEmbedding] Successfully upserted ID "${generatedId}" for "${metadata.name}".`);
-  } catch (error) {
+    await index.upsert([recordToUpsert]);
+    console.log(`[storeResponseEmbedding] Upserted ID "${generatedId}" for "${metadata.name}".`);
+  } catch (error)
+ {
     console.error(`[storeResponseEmbedding] Failed to upsert data for "${metadata.name}" (ID: "${generatedId}"):`, error);
     throw error;
   }
 }
 
-// Define a type for the filter object based on Pinecone's capabilities.
-// This is a simplified version; for complex filters, refer to Pinecone documentation.
-export type PineconeQueryFilter = Record<string, string | number | boolean | { [key: string]: any }>;
+// --- Querying and Similarity ---
+export type PineconeFilterValue = PineconeMetadataValue | { [key: string]: PineconeMetadataValue | PineconeMetadataValue[] | object };
+export type PineconeQueryFilter = Record<string, PineconeFilterValue>;
 
+interface InternalQueryOptions {
+    vector: number[];
+    id?: string;
+    sparseValues?: { indices: number[]; values: number[]; };
+    topK: number;
+    filter?: PineconeQueryFilter; // PineconeQueryFilter is used here
+    includeMetadata?: boolean;
+    includeValues?: boolean;
+    namespace?: string;
+}
 
-export async function findSimilarResponses(
+export interface PineconeMatch<TMetadata extends BasePineconeMetadata = StorableMetadata> extends SDKPineconeRecord<TMetadata> {
+  score?: number;
+}
+
+export async function findSimilarResponses<TMetadata extends BasePineconeMetadata = StorableMetadata>(
   queryText: string,
   limit: number = 5,
-  filter?: PineconeQueryFilter // Added optional filter parameter
-): Promise<any[]> { // Consider defining a PineconeMatch[] return type consistent with your test script
-  console.log(`[findSimilarResponses] Searching for similar responses to query: "${queryText.substring(0, 60)}..." (topK: ${limit})`);
-  if (filter) {
-    console.log(`[findSimilarResponses]   Applying filter: ${JSON.stringify(filter)}`);
-  }
+  filter?: PineconeQueryFilter // Parameter is PineconeQueryFilter
+): Promise<PineconeMatch<TMetadata>[]> {
+  console.log(`[findSimilarResponses] Searching for query: "${queryText.substring(0, 60)}...", topK: ${limit}`);
+  if (filter) console.log(`[findSimilarResponses]   Applying filter: ${JSON.stringify(filter)}`);
 
   if (!queryText || queryText.trim() === "") {
-    console.warn("[findSimilarResponses] Received empty or whitespace-only query text. Returning empty array.");
+    console.warn("[findSimilarResponses] Empty query text. Returning empty array.");
     return [];
   }
 
-  const index = getIndex();
+  const index = getIndex<TMetadata>();
   let queryEmbedding: number[];
 
   try {
-    console.log("[findSimilarResponses]   Creating embedding for query text...");
     queryEmbedding = await createEmbedding(queryText);
-    console.log(`[findSimilarResponses]   Query embedding created (Dimension: ${queryEmbedding.length}).`);
-
     if (queryEmbedding.length !== EXPECTED_EMBEDDING_DIMENSION) {
-      const errMsg = `[findSimilarResponses] CRITICAL: Query embedding dimension mismatch! Expected ${EXPECTED_EMBEDDING_DIMENSION}, got ${queryEmbedding.length}.`;
-      console.error(errMsg);
-      throw new Error(errMsg);
+        throw new Error(`Query embedding dimension mismatch! Expected ${EXPECTED_EMBEDDING_DIMENSION}, got ${queryEmbedding.length}.`);
     }
   } catch (error) {
-    console.error("[findSimilarResponses] Failed to create embedding for query text:", error);
+    console.error("[findSimilarResponses] Failed to create embedding for query:", error);
     throw error;
   }
 
   try {
-    console.log(`[findSimilarResponses]   Querying Pinecone index "${RESPONSES_INDEX}"...`);
-    const queryOptions: any = { // Using 'any' for flexibility, can be typed more strictly
+    const queryOptions: InternalQueryOptions = {
       vector: queryEmbedding,
       topK: limit,
       includeMetadata: true,
-      // includeValues: false, // Optional: set to true if you need the vectors themselves
+      includeValues: false,
     };
 
     if (filter) {
+      // Assign directly as types match (PineconeQueryFilter | undefined)
       queryOptions.filter = filter;
     }
 
-    const results = await index.query(queryOptions);
-    console.log(`[findSimilarResponses]   Pinecone query returned ${results.matches?.length || 0} matches.`);
-    return results.matches || [];
+    // The 'as any' cast is kept here because InternalQueryOptions (specifically its 'filter' field
+    // of type PineconeQueryFilter) may not perfectly align with the Pinecone SDK's
+    // 'QueryOperationRequest' type if its 'Filter<T>' resolves to a simpler structure like Partial<TMetadata>.
+    // This cast acknowledges that our PineconeQueryFilter is richer to support documented filter capabilities.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await index.query(queryOptions as any);
+
+    return (results.matches as PineconeMatch<TMetadata>[]) || [];
   } catch (error) {
     console.error("[findSimilarResponses] Failed to query Pinecone:", error);
     throw error;
@@ -200,98 +244,92 @@ export async function findSimilarResponses(
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {
-    console.error("[cosineSimilarity] Vector length mismatch.");
-    throw new Error("Vectors must have the same length");
+    throw new Error("Vectors must have the same length for cosine similarity.");
   }
   let dotProduct = 0;
   let normA = 0;
   let normB = 0;
   for (let i = 0; i < a.length; i++) {
     dotProduct += a[i] * b[i];
-    normA += a[i] * a[i]; // Square of each element
-    normB += b[i] * b[i]; // Square of each element
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
   }
   const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-  if (denominator === 0) {
-    return 0;
-  }
-  return dotProduct / denominator;
+  return denominator === 0 ? 0 : dotProduct / denominator;
 }
 
 export async function getSimilarity(pointId1: string, pointId2: string): Promise<number> {
   ensureServer("getSimilarity");
-  console.log(`[getSimilarity] Calculating similarity between Pinecone points: "${pointId1}" and "${pointId2}"`);
+  console.log(`[getSimilarity] Calculating similarity between: "${pointId1}" and "${pointId2}"`);
   try {
-    const index = getIndex();
+    const index = getIndex<BasePineconeMetadata>();
     const fetchResult = await index.fetch([pointId1, pointId2]);
 
-    const vector1 = fetchResult.records[pointId1]?.values;
-    const vector2 = fetchResult.records[pointId2]?.values;
+    const vector1 = fetchResult.records?.[pointId1]?.values;
+    const vector2 = fetchResult.records?.[pointId2]?.values;
 
     if (!vector1 || !vector2) {
-      const missingIds = [];
-      if (!vector1) missingIds.push(pointId1);
-      if (!vector2) missingIds.push(pointId2);
-      console.error(`[getSimilarity] Failed to retrieve vectors for one or both points: ${missingIds.join(', ')}`);
-      throw new Error(`Failed to retrieve vectors for: ${missingIds.join(', ')}`);
+      const missing = !vector1 ? pointId1 : pointId2;
+      throw new Error(`Failed to retrieve vector for point: ${missing}`);
     }
-
-    console.log(`[getSimilarity]   Vectors retrieved. Calculating cosine similarity.`);
     return cosineSimilarity(vector1, vector2);
   } catch (error) {
-    console.error(`[getSimilarity] Error calculating similarity between "${pointId1}" and "${pointId2}":`, error);
+    console.error(`[getSimilarity] Error for "${pointId1}" vs "${pointId2}":`, error);
     throw error;
   }
 }
 
-export async function generateFormConnections(formId: string) {
+interface Connection {
+  response1Id: string;
+  response2Id: string;
+  response1Name: string;
+  response2Name: string;
+  similarityScore: number;
+}
+
+export async function generateFormConnections(formId: string): Promise<Connection[]> {
   ensureServer("generateFormConnections");
-  console.log(`[generateFormConnections] Generating connections for formId: "${formId}" in namespace "ns1"`);
+  const namespace = 'ns1';
+  console.log(`[generateFormConnections] Generating for formId: "${formId}" in namespace "${namespace}"`);
   try {
-    const namespace = 'ns1'; // This function is hardcoded to use 'ns1'
-    const index = getIndex();
+    const index = getIndex<FormSpecificMetadata>();
 
-    console.log(`[generateFormConnections]   Querying namespace "${namespace}" with filter for form_id "${formId}".`);
-    // Note: Querying with a zero vector relies heavily on filters and topK to get relevant points.
-    // This is a specific strategy for fetching points based on metadata.
-    const result = await index.namespace(namespace).query({
+    const queryOptions: InternalQueryOptions = {
       vector: new Array(EXPECTED_EMBEDDING_DIMENSION).fill(0),
-      topK: 100, // Fetch up to 100 points matching the filter
+      topK: 100,
       includeMetadata: true,
-      includeValues: true, // Important if you want to avoid re-fetching vectors in getSimilarity
-      filter: { form_id: { $eq: formId } },
-    });
+      includeValues: true,
+      filter: { form_id: { $eq: formId } } as PineconeQueryFilter, // Cast for complex filter object
+      namespace: namespace,
+    };
 
-    const points = result.matches || [];
-    console.log(`[generateFormConnections]   Found ${points.length} points matching filter.`);
-    const connections = [];
+    // Similar to findSimilarResponses, the 'as any' cast is retained for the call to index.query
+    // due to potential discrepancies between our rich PineconeQueryFilter and the SDK's static filter types.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await index.query(queryOptions as any);
+    const points: PineconeMatch<FormSpecificMetadata>[] = (result.matches as PineconeMatch<FormSpecificMetadata>[]) || [];
+    console.log(`[generateFormConnections] Found ${points.length} points.`);
+    const connections: Connection[] = [];
 
-    // Consider optimizing if points.length is large. N^2 comparisons can be slow.
     for (let i = 0; i < points.length; i++) {
       for (let j = i + 1; j < points.length; j++) {
         const p1 = points[i];
         const p2 = points[j];
 
-        let sim: number;
-        if (p1.values && p2.values) { // Check if vectors were included in the query response
-            sim = cosineSimilarity(p1.values, p2.values);
-        } else {
-            // Fallback to fetching if vectors weren't included (e.g., includeValues was false)
-            // This part would be less efficient.
-            console.warn(`[generateFormConnections] Vectors not included in query results for ${p1.id} or ${p2.id}. Re-fetching for similarity. Consider setting includeValues: true in query.`);
-            sim = await getSimilarity(p1.id, p2.id);
+        if (!p1.metadata || !p2.metadata || !p1.values || !p2.values) {
+          console.warn(`[generateFormConnections] Skipping pair due to missing data: ${p1.id}, ${p2.id}`);
+          continue;
         }
-
         connections.push({
-          response1Id: p1.metadata?.response_id as string, // Add type assertions if confident
-          response2Id: p2.metadata?.response_id as string,
-          response1Name: p1.metadata?.respondent_name as string,
-          response2Name: p2.metadata?.respondent_name as string,
-          similarityScore: sim,
+          response1Id: p1.metadata.response_id,
+          response2Id: p2.metadata.response_id,
+          response1Name: p1.metadata.respondent_name,
+          response2Name: p2.metadata.respondent_name,
+          similarityScore: cosineSimilarity(p1.values, p2.values),
         });
       }
     }
-    console.log(`[generateFormConnections]   Generated ${connections.length} pairwise connections.`);
+    console.log(`[generateFormConnections] Generated ${connections.length} connections.`);
     return connections.sort((a, b) => b.similarityScore - a.similarityScore);
   } catch (error) {
     console.error(`[generateFormConnections] Error for formId "${formId}":`, error);

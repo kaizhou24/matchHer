@@ -357,7 +357,7 @@ export default function DashboardPage() {
                         </Avatar>
                         <div>
                           <p className="font-medium">Alex Johnson</p>
-                          <p className="text-sm text-gray-500">I've shared some resources for you to review...</p>
+                          <p className="text-sm text-gray-500">I&#39;ve shared some resources for you to review...</p>
                         </div>
                       </div>
                       <div className="flex flex-col items-end">

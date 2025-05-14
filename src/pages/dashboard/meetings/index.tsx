@@ -76,8 +76,9 @@ export default function MeetingsPage() {
   ]
 
   const handleScheduleMeeting = async () => {
-    if (!date || !selectedTime || !title) {
+    if (!date || !selectedTime || !title || !selectedMeetingType) {
       // Show error message
+      alert("Please fill in all required fields.")
       return
     }
 
@@ -120,6 +121,7 @@ export default function MeetingsPage() {
     const newMeeting = {
       id: upcomingMeetings.length + 1,
       title,
+      type: meetingTypes.find((type) => type.id === selectedMeetingType)?.name || 'Other',
       date: format(date, 'MMM d, yyyy'),
       time: `${selectedTime} - ${format(endDate, 'h:mm a')}`,
       partner: "Alex Johnson", // This would come from your actual mentor/mentee data

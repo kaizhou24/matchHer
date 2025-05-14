@@ -1,40 +1,41 @@
-import { useState } from "react"
-import Link from "next/link"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
-import { Calendar, Check, ChevronRight, Edit, FileText, PenLine, Plus, Search, Settings, Users } from "lucide-react"
+import { useState } from "react";
+import Link from "next/link";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { Calendar, Check, ChevronRight, Edit, FileText, PenLine, Plus, Search, Settings, Users } from "lucide-react";
 
 interface MeetingNote {
-  id: number
-  title: string
-  date: string
-  partner: string
-  content: string
-  reflections: string
-  tags: string[]
+  id: number;
+  title: string;
+  date: string;
+  partner: string;
+  content: string;
+  reflections: string;
+  tags: string[];
 }
 
 interface JournalEntry {
-  id: number
-  title: string
-  date: string
-  content: string
-  mood: string
+  id: number;
+  title: string;
+  date: string;
+  content: string;
+  mood: string;
 }
 
-type Note = MeetingNote | JournalEntry
+// This is the type that was previously unused
+type Note = MeetingNote | JournalEntry;
 
 export default function NotesPage() {
-  const [activeTab, setActiveTab] = useState("meeting-notes")
-  const [selectedNote, setSelectedNote] = useState<number | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
+  const [activeTab, setActiveTab] = useState("meeting-notes");
+  const [selectedNote, setSelectedNote] = useState<number | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
 
-  // Mock data for demonstration
-  const meetingNotes = [
+  // Mock data for demonstration (explicitly typing them for clarity)
+  const meetingNotes: MeetingNote[] = [
     {
       id: 1,
       title: "Career Planning Session",
@@ -68,9 +69,9 @@ export default function NotesPage() {
         "The mock interview was harder than I expected, but very helpful. I need to work on being more concise while still telling a compelling story.",
       tags: ["interviews", "job-search"],
     },
-  ]
+  ];
 
-  const journalEntries = [
+  const journalEntries: JournalEntry[] = [
     {
       id: 1,
       title: "Weekly Reflection",
@@ -87,15 +88,44 @@ export default function NotesPage() {
         "Checking in on my quarterly goals:\n\n1. PM Certification: 15% complete - on track\n2. Networking: Connected with 5/10 target contacts - on track\n3. Public Speaking: Joined Toastmasters - on track\n4. Technical Skills: Completed 1/3 planned courses - falling behind\n\nI need to allocate more time to the technical skills portion of my development plan. Will adjust my schedule to dedicate two evenings per week specifically to this area.",
       mood: "Focused",
     },
-  ]
+  ];
 
-  const selectedNoteData = activeTab === "meeting-notes"
-    ? meetingNotes.find((note): note is MeetingNote => note.id === selectedNote)
-    : journalEntries.find((entry): entry is JournalEntry => entry.id === selectedNote)
+  // --- FIX: Use the 'Note' type for selectedNoteData ---
+  const selectedNoteData: Note | undefined =
+    activeTab === "meeting-notes"
+      ? meetingNotes.find((note) => note.id === selectedNote)
+      : journalEntries.find((entry) => entry.id === selectedNote);
+
+  // TODO: Implement actual edit saving logic
+  const handleSaveChanges = () => {
+    if (!selectedNoteData) return;
+    // In a real app, you'd get the new values from the Input/Textarea components
+    // (which would need to be controlled or use refs) and then update your state/backend.
+    console.log("Saving changes for:", selectedNoteData.title);
+    setIsEditing(false);
+    // Example:
+    // if (activeTab === "meeting-notes") {
+    //   setMeetingNotes(prev => prev.map(n => n.id === selectedNoteData.id ? {...n, title: newTitle, content: newContent } : n));
+    // } else {
+    //   setJournalEntries(prev => prev.map(e => e.id === selectedNoteData.id ? {...e, title: newTitle, content: newContent } : e));
+    // }
+  };
+  
+  // Placeholder for making avatar fallback dynamic
+  const getAvatarFallback = (name?: string) => {
+    if (!name) return "P"; // Default P for Partner
+    const parts = name.split(" ");
+    if (parts.length > 1) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return parts[0].substring(0, 2).toUpperCase();
+  };
+
 
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b bg-white">
+        {/* Header content remains the same */}
         <div className="container mx-auto max-w-7xl px-4 flex h-16 items-center justify-between">
           <div className="flex items-center gap-2">
             <Users className="h-6 w-6 text-pink-500" />
@@ -139,12 +169,17 @@ export default function NotesPage() {
               <h1 className="text-3xl font-bold">Meeting Notes & Journal</h1>
               <p className="text-gray-500">Track your progress and reflections</p>
             </div>
+            {/* TODO: Implement 'New Entry' functionality */}
             <Button className="bg-pink-500 hover:bg-pink-600">
               <Plus className="mr-2 h-4 w-4" /> New Entry
             </Button>
           </div>
 
-          <Tabs defaultValue="meeting-notes" className="space-y-8" onValueChange={setActiveTab}>
+          <Tabs defaultValue="meeting-notes" className="space-y-8" onValueChange={(value) => {
+            setActiveTab(value);
+            setSelectedNote(null); // Reset selected note when tab changes
+            setIsEditing(false); // Reset editing state
+          }}>
             <TabsList className="grid w-full grid-cols-2 md:w-auto">
               <TabsTrigger value="meeting-notes">Meeting Notes</TabsTrigger>
               <TabsTrigger value="journal">Personal Journal</TabsTrigger>
@@ -155,6 +190,7 @@ export default function NotesPage() {
                 <div className="mb-4">
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    {/* TODO: Implement Search functionality */}
                     <Input placeholder="Search notes..." className="pl-9" />
                   </div>
                 </div>
@@ -162,7 +198,7 @@ export default function NotesPage() {
                 <TabsContent value="meeting-notes" className="m-0">
                   <div className="rounded-lg border bg-white shadow-sm">
                     <div className="border-b p-4">
-                      <h2 className="font-medium">Meeting Notes</h2>
+                      <h2 className="font-medium">Meeting Notes ({meetingNotes.length})</h2>
                     </div>
                     <div className="divide-y max-h-[600px] overflow-y-auto">
                       {meetingNotes.map((note) => (
@@ -171,18 +207,21 @@ export default function NotesPage() {
                           className={`p-4 cursor-pointer hover:bg-gray-50 ${
                             selectedNote === note.id ? "bg-pink-50" : ""
                           }`}
-                          onClick={() => setSelectedNote(note.id)}
+                          onClick={() => {
+                            setSelectedNote(note.id);
+                            setIsEditing(false); // Ensure not in edit mode when selecting new note
+                          }}
                         >
                           <div className="mb-1 flex items-center justify-between">
                             <h3 className="font-medium">{note.title}</h3>
-                            <ChevronRight className="h-4 w-4 text-gray-400" />
+                            {selectedNote !== note.id && <ChevronRight className="h-4 w-4 text-gray-400" />}
                           </div>
                           <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
                             <Calendar className="h-3 w-3" />
                             <span>{note.date}</span>
                             <div className="flex items-center gap-1">
                               <Avatar className="h-4 w-4">
-                                <AvatarFallback className="text-[8px]">AJ</AvatarFallback>
+                                <AvatarFallback className="text-[8px]">{getAvatarFallback(note.partner)}</AvatarFallback>
                               </Avatar>
                               <span>{note.partner}</span>
                             </div>
@@ -197,7 +236,7 @@ export default function NotesPage() {
                 <TabsContent value="journal" className="m-0">
                   <div className="rounded-lg border bg-white shadow-sm">
                     <div className="border-b p-4">
-                      <h2 className="font-medium">Journal Entries</h2>
+                      <h2 className="font-medium">Journal Entries ({journalEntries.length})</h2>
                     </div>
                     <div className="divide-y max-h-[600px] overflow-y-auto">
                       {journalEntries.map((entry) => (
@@ -206,16 +245,19 @@ export default function NotesPage() {
                           className={`p-4 cursor-pointer hover:bg-gray-50 ${
                             selectedNote === entry.id ? "bg-pink-50" : ""
                           }`}
-                          onClick={() => setSelectedNote(entry.id)}
+                          onClick={() => {
+                            setSelectedNote(entry.id);
+                            setIsEditing(false);
+                          }}
                         >
                           <div className="mb-1 flex items-center justify-between">
                             <h3 className="font-medium">{entry.title}</h3>
-                            <ChevronRight className="h-4 w-4 text-gray-400" />
+                            {selectedNote !== entry.id && <ChevronRight className="h-4 w-4 text-gray-400" />}
                           </div>
                           <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
                             <Calendar className="h-3 w-3" />
                             <span>{entry.date}</span>
-                            <span className="rounded-full bg-pink-100 px-2 py-0.5 text-pink-800">{entry.mood}</span>
+                            <span className="rounded-full bg-pink-100 px-2 py-0.5 text-xs text-pink-800">{entry.mood}</span>
                           </div>
                           <p className="text-sm text-gray-500 line-clamp-2">{entry.content}</p>
                         </div>
@@ -230,17 +272,18 @@ export default function NotesPage() {
                   <Card>
                     <CardHeader className="flex flex-row items-start justify-between space-y-0">
                       {isEditing ? (
-                        <Input defaultValue={selectedNoteData.title} className="text-xl font-bold" />
+                        // TODO: Make Input controlled for editing title
+                        <Input defaultValue={selectedNoteData.title} className="text-xl font-bold border-pink-500" autoFocus />
                       ) : (
                         <CardTitle>{selectedNoteData.title}</CardTitle>
                       )}
                       <div className="flex gap-2">
                         {isEditing ? (
                           <Button
-                            variant="outline"
+                            variant="default" // Changed for emphasis
                             size="sm"
-                            onClick={() => setIsEditing(false)}
-                            className="text-green-600"
+                            onClick={handleSaveChanges} // Connect to actual save logic
+                            className="bg-green-500 hover:bg-green-600 text-white"
                           >
                             <Check className="mr-1 h-4 w-4" /> Save
                           </Button>
@@ -257,42 +300,49 @@ export default function NotesPage() {
                           <Calendar className="h-4 w-4" />
                           <span>{selectedNoteData.date}</span>
                         </div>
-                        {activeTab === "meeting-notes" && (
+                        {/* Type guard to safely access properties of MeetingNote */}
+                        {(selectedNoteData as MeetingNote).partner && activeTab === "meeting-notes" && (
                           <div className="flex items-center gap-1">
                             <Avatar className="h-5 w-5">
-                              <AvatarFallback className="text-[10px]">AJ</AvatarFallback>
+                              <AvatarFallback className="text-[10px]">
+                                {getAvatarFallback((selectedNoteData as MeetingNote).partner)}
+                              </AvatarFallback>
                             </Avatar>
-                            <span>With {(selectedNoteData as MeetingNote)?.partner}</span>
+                            <span>With {(selectedNoteData as MeetingNote).partner}</span>
                           </div>
                         )}
-                        {activeTab === "journal" && (
+                        {/* Type guard to safely access properties of JournalEntry */}
+                        {(selectedNoteData as JournalEntry).mood && activeTab === "journal" && (
                           <div className="flex items-center gap-1">
-                            <span className="rounded-full bg-pink-100 px-2 py-0.5 text-pink-800">
-                              {(selectedNoteData as JournalEntry)?.mood}
+                            <span className="rounded-full bg-pink-100 px-2 py-0.5 text-sm text-pink-800">
+                              {(selectedNoteData as JournalEntry).mood}
                             </span>
                           </div>
                         )}
                       </div>
 
                       {isEditing ? (
-                        <Textarea defaultValue={selectedNoteData.content} className="min-h-[300px]" />
+                        // TODO: Make Textarea controlled for editing content
+                        <Textarea defaultValue={selectedNoteData.content} className="min-h-[300px] border-pink-500" />
                       ) : (
                         <div className="whitespace-pre-line text-gray-700">{selectedNoteData.content}</div>
                       )}
 
-                      {activeTab === "meeting-notes" && (
+                      {/* Type guard for MeetingNote specific fields */}
+                      {activeTab === "meeting-notes" && 'reflections' in selectedNoteData && (
                         <>
                           <div>
                             <h3 className="mb-2 font-medium">Reflections</h3>
                             {isEditing ? (
+                              // TODO: Make Textarea controlled for editing reflections
                               <Textarea
-                                defaultValue={(selectedNoteData as MeetingNote)?.reflections}
-                                className="min-h-[100px]"
+                                defaultValue={(selectedNoteData as MeetingNote).reflections}
+                                className="min-h-[100px] border-pink-500"
                                 placeholder="What did you learn from this meeting? How do you feel about the progress made?"
                               />
                             ) : (
-                              <div className="rounded-lg border bg-gray-50 p-4 text-gray-700">
-                                {(selectedNoteData as MeetingNote)?.reflections}
+                              <div className="rounded-lg border bg-gray-50 p-4 text-gray-700 whitespace-pre-line">
+                                {(selectedNoteData as MeetingNote).reflections || <span className="italic text-gray-400">No reflections added.</span>}
                               </div>
                             )}
                           </div>
@@ -300,12 +350,13 @@ export default function NotesPage() {
                           <div>
                             <h3 className="mb-2 font-medium">Tags</h3>
                             <div className="flex flex-wrap gap-2">
-                              {(selectedNoteData as MeetingNote)?.tags?.map((tag: string) => (
+                              {(selectedNoteData as MeetingNote).tags?.map((tag: string) => (
                                 <span key={tag} className="rounded-full bg-pink-100 px-3 py-1 text-sm text-pink-800">
                                   {tag}
                                 </span>
                               ))}
                               {isEditing && (
+                                // TODO: Implement Add Tag functionality
                                 <Button variant="outline" size="sm" className="h-7">
                                   <Plus className="mr-1 h-3 w-3" /> Add Tag
                                 </Button>
@@ -316,21 +367,27 @@ export default function NotesPage() {
                       )}
                     </CardContent>
                     <CardFooter className="flex justify-between border-t pt-6">
+                       {/* TODO: Implement Export functionality */}
                       <Button variant="outline">
                         <FileText className="mr-2 h-4 w-4" /> Export
                       </Button>
+                       {/* TODO: Implement Add Follow-up functionality */}
                       <Button className="bg-pink-500 hover:bg-pink-600">
                         <PenLine className="mr-2 h-4 w-4" /> Add Follow-up
                       </Button>
                     </CardFooter>
                   </Card>
                 ) : (
-                  <div className="flex h-full flex-col items-center justify-center rounded-lg border bg-white p-12 text-center shadow-sm">
+                  <div className="flex h-full flex-col items-center justify-center rounded-lg border bg-white p-12 text-center shadow-sm min-h-[400px]">
                     <FileText className="mb-4 h-12 w-12 text-gray-300" />
                     <h3 className="mb-2 text-xl font-medium">No note selected</h3>
-                    <p className="mb-6 text-gray-500">Select a note from the sidebar to view its contents</p>
+                    <p className="mb-6 text-gray-500">
+                      {activeTab === "meeting-notes" ? "Select a meeting note " : "Select a journal entry "}
+                       from the list to view its contents, or create a new one.
+                    </p>
+                     {/* TODO: Implement Create New Note functionality for this button too */}
                     <Button className="bg-pink-500 hover:bg-pink-600">
-                      <Plus className="mr-2 h-4 w-4" /> Create New Note
+                      <Plus className="mr-2 h-4 w-4" /> Create New {activeTab === "meeting-notes" ? "Meeting Note" : "Journal Entry"}
                     </Button>
                   </div>
                 )}
@@ -340,5 +397,5 @@ export default function NotesPage() {
         </div>
       </main>
     </div>
-  )
+  );
 }
